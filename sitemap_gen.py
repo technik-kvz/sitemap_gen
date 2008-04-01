@@ -22,8 +22,9 @@ import urllib2
 import urlparse
 from HTMLParser import HTMLParser
 from HTMLParser import HTMLParseError
+import xml.sax.saxutils
 
-helpText = """sitemap_gen.py version 1.0
+helpText = """sitemap_gen.py version 1.0.1
 
 This script crawls a web site from a given starting URL and generates
 a Sitemap file in the format that is accepted by Google. The crawler
@@ -174,7 +175,7 @@ def generateSitemapFile(pageMap, fileName, changefreq="", priority=0.0):
     fw.write('''<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n''')
     for i in pageMap.keys():
-        fw.write('<url>\n  <loc>%s</loc>\n' % (i))
+        fw.write('<url>\n  <loc>%s</loc>\n' % (xml.sax.saxutils.escape(i)))
         if pageMap[i] not in [(), (0,0,0)]:
             fw.write('  <lastmod>%4d-%02d-%02d</lastmod>\n' % pageMap[i])
         if changefreq <> "":
