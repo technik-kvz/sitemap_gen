@@ -24,7 +24,7 @@ from HTMLParser import HTMLParser
 from HTMLParser import HTMLParseError
 import xml.sax.saxutils
 
-helpText = """sitemap_gen.py version 1.0.1
+helpText = """sitemap_gen.py version 1.0.2
 
 This script crawls a web site from a given starting URL and generates
 a Sitemap file in the format that is accepted by Google. The crawler
@@ -93,6 +93,12 @@ def getPage(url):
 #end def
 
 
+def joinUrls(baseUrl, newUrl):
+	helpUrl, fragment = urlparse.urldefrag(newUrl)
+        return urlparse.urljoin(baseUrl, helpUrl)
+#end def
+
+
 class MyHTMLParser(HTMLParser):
 
     def __init__(self, pageMap, baseUrl, maxUrls, blockExtensions):
@@ -119,13 +125,16 @@ class MyHTMLParser(HTMLParser):
         if len(self.pageMap) >= self.maxUrls:
             return
         
-        if (tag.upper() == "A"):
+        if (tag.upper() == "BASE"):
+	    if (attrs[0][0].upper() == "HREF"):
+		self.baseUrl = joinUrls(self.baseUrl, attrs[0][1])
+		print "BASE URL set to", self.baseUrl
+
+	if (tag.upper() == "A"):
             if (attrs[0][0]).upper() == "HREF" \
                and (attrs[0][0]).upper().find('MAILTO:') == -1:
                 #print "HREF:", attrs[0][1]
-                newUrl, fragment = urlparse.urldefrag(attrs[0][1])
-                url = urlparse.urljoin(self.baseUrl, newUrl)
-                #url = url.replace("../", "")
+		url = joinUrls(self.baseUrl, attrs[0][1])
                 if urlparse.urlsplit(url)[1] <> self.server:
                     return
                 if self.hasBlockedExtension(url):
