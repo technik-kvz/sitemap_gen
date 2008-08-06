@@ -2,6 +2,9 @@
 """ 
     Copyright (C) 2007 Vladimir Toncar
 
+    Contributors:
+        Redirect handling by Pavel "ShadoW" Dvorak
+
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation; either version 3 of the License, or
@@ -24,7 +27,7 @@ from HTMLParser import HTMLParser
 from HTMLParser import HTMLParseError
 import xml.sax.saxutils
 
-helpText = """sitemap_gen.py version 1.0.2
+helpText = """sitemap_gen.py version 1.0.3 (2008-08-06)
 
 This script crawls a web site from a given starting URL and generates
 a Sitemap file in the format that is accepted by Google. The crawler
@@ -79,17 +82,17 @@ def getPage(url):
         f = urllib2.urlopen(url)
         page = ""
         for i in f.readlines():
-            page = page + i
+            page += i
         date = f.info().getdate('Last-Modified')
         if date == None:
             date = (0, 0, 0)
         else:
             date = date[:3]
         f.close()
-        return (page, date)
+        return (page, date, f.url)
     except urllib2.URLError, detail:
         print "%s. Skipping..." % (detail)
-        return (None, (0,0,0))
+        return (None, (0,0,0), "")
 #end def
 
 
@@ -101,9 +104,10 @@ def joinUrls(baseUrl, newUrl):
 
 class MyHTMLParser(HTMLParser):
 
-    def __init__(self, pageMap, baseUrl, maxUrls, blockExtensions):
+    def __init__(self, pageMap, redirects, baseUrl, maxUrls, blockExtensions):
         HTMLParser.__init__(self)
         self.pageMap = pageMap
+	self.redirects = redirects
         self.baseUrl = baseUrl
         self.server = urlparse.urlsplit(baseUrl)[1] # netloc in python 2.5
         self.maxUrls = maxUrls
@@ -137,7 +141,7 @@ class MyHTMLParser(HTMLParser):
 		url = joinUrls(self.baseUrl, attrs[0][1])
                 if urlparse.urlsplit(url)[1] <> self.server:
                     return
-                if self.hasBlockedExtension(url):
+                if self.hasBlockedExtension(url) or self.redirects.count(url) > 0:
                     return
                 if not(self.pageMap.has_key(url)):
                     self.pageMap[url] = ()
@@ -152,22 +156,27 @@ def getUrlToProcess(pageMap):
             return i
     return None
 
-
 def parsePages(startUrl, maxUrls, blockExtensions):
     pageMap = {}
-    pageMap[startUrl] = ()    
+    pageMap[startUrl] = ()
+    redirects = []
 
-    while 1:
+    while True:
         url = getUrlToProcess(pageMap)
         if url == None:
             break
         print " ", url
-        page, date = getPage(url)
+        page, date, newUrl = getPage(url)
         if page == None:
             del pageMap[url]
+	elif url != newUrl:
+	    print "Redirect -> " + newUrl
+            del pageMap[url]
+	    pageMap[newUrl] = ()
+	    redirects.append(url)
         else:
             pageMap[url] = date
-            parser = MyHTMLParser(pageMap, url, maxUrls, blockExtensions)
+            parser = MyHTMLParser(pageMap, redirects, url, maxUrls, blockExtensions)
             try:
                 parser.feed(page)
                 parser.close()
