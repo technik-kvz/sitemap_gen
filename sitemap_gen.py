@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 """ 
-    Copyright (C) 2007 Vladimir Toncar
+    Copyright (C) 2007-2009 Vladimir Toncar
 
     Contributors:
         Redirect handling by Pavel "ShadoW" Dvorak
@@ -26,12 +26,17 @@ import urlparse
 from HTMLParser import HTMLParser
 from HTMLParser import HTMLParseError
 import xml.sax.saxutils
+import robotparser
+import re
+import httplib
 
-helpText = """sitemap_gen.py version 1.0.3 (2008-08-06)
+
+helpText = """sitemap_gen.py version 1.1.0 (2009-09-05)
 
 This script crawls a web site from a given starting URL and generates
 a Sitemap file in the format that is accepted by Google. The crawler
-does not follow links to other web sites.
+does not follow links to other web sites. It also respects the 'nofollow'
+tags and will not crawl into directories disallowed in the robots.txt file.
 
 Command line syntax:
 
@@ -76,7 +81,6 @@ For more information, visit http://toncar.cz/opensource/sitemap_gen.html
 allowedChangefreq = ["always", "hourly", "daily", "weekly", \
                      "monthly", "yearly", "never"]
 
-
 def getPage(url):
     try:
         f = urllib2.urlopen(url)
@@ -102,9 +106,26 @@ def joinUrls(baseUrl, newUrl):
 #end def
 
 
+def getRobotParser(startUrl):
+	rp = robotparser.RobotFileParser()
+	
+	robotUrl = urlparse.urljoin(startUrl, "/robots.txt")
+	page, date, url = getPage(robotUrl)
+
+	if page == None:
+	    print "Could not read ROBOTS.TXT at:", robotUrl
+	    return None
+	#end if
+
+	rp.parse(page)
+	print "Found ROBOTS.TXT at:", robotUrl
+	return rp
+#end def
+
+
 class MyHTMLParser(HTMLParser):
 
-    def __init__(self, pageMap, redirects, baseUrl, maxUrls, blockExtensions):
+    def __init__(self, pageMap, redirects, baseUrl, maxUrls, blockExtensions, robotParser):
         HTMLParser.__init__(self)
         self.pageMap = pageMap
 	self.redirects = redirects
@@ -112,6 +133,7 @@ class MyHTMLParser(HTMLParser):
         self.server = urlparse.urlsplit(baseUrl)[1] # netloc in python 2.5
         self.maxUrls = maxUrls
         self.blockExtensions = blockExtensions
+	self.robotParser = robotParser
     #end def
 
     def hasBlockedExtension(self, url):
@@ -134,21 +156,37 @@ class MyHTMLParser(HTMLParser):
 		self.baseUrl = joinUrls(self.baseUrl, attrs[0][1])
 		print "BASE URL set to", self.baseUrl
 
-	if (tag.upper() == "A"):
-            if (attrs[0][0]).upper() == "HREF" \
-               and (attrs[0][0]).upper().find('MAILTO:') == -1:
-                #print "HREF:", attrs[0][1]
-		url = joinUrls(self.baseUrl, attrs[0][1])
-                if urlparse.urlsplit(url)[1] <> self.server:
-                    return
-                if self.hasBlockedExtension(url) or self.redirects.count(url) > 0:
-                    return
-                if not(self.pageMap.has_key(url)):
-                    self.pageMap[url] = ()
-                    #print "Adding: ", url
+        if (tag.upper() == "A"):
+	    #print "Attrs:", attrs
+            url = ""
+            # Let's scan the list of tag's attributes
+	    for attr in attrs:
+                #print "  attr:", attr
+                if (attr[0].upper() == "REL") and (attr[1].upper().find('NOFOLLOW') != -1):
+                    # We have discovered a nofollow, so we won't continue
+                    return  
+                elif (attr[0].upper() == "HREF") and (attr[1].upper().find('MAILTO:') == -1):
+                    # We have discovered a link that is not a Mailto:
+                    url = joinUrls(self.baseUrl, attr[1])
+            #end for
+            # if the url is empty, there was none in the list of attributes
+            if url == "": return
+            
+            # Check if we want to follow the link
+            if urlparse.urlsplit(url)[1] <> self.server:
+                return
+            if self.hasBlockedExtension(url) or self.redirects.count(url) > 0:
+                return
+            if (self.robotParser <> None) and not(self.robotParser.can_fetch("*", url)):
+                print "URL restricted by ROBOTS.TXT: ", url
+                return
+            # It's OK to add url to the map and fetch it later
+            if not(self.pageMap.has_key(url)):
+                self.pageMap[url] = ()
+        #end if
+	    
     #end def
 #end class
-
 
 def getUrlToProcess(pageMap):
     for i in pageMap.keys():
@@ -160,6 +198,8 @@ def parsePages(startUrl, maxUrls, blockExtensions):
     pageMap = {}
     pageMap[startUrl] = ()
     redirects = []
+
+    robotParser = getRobotParser(startUrl)
 
     while True:
         url = getUrlToProcess(pageMap)
@@ -176,12 +216,14 @@ def parsePages(startUrl, maxUrls, blockExtensions):
 	    redirects.append(url)
         else:
             pageMap[url] = date
-            parser = MyHTMLParser(pageMap, redirects, url, maxUrls, blockExtensions)
+            parser = MyHTMLParser(pageMap, redirects, url, maxUrls, blockExtensions, robotParser)
             try:
                 parser.feed(page)
                 parser.close()
             except HTMLParseError:
                 print "Error parsing %s, skipping." % (url)
+            except UnicodeDecodeError:
+                print "Failed decoding %s . Try to check if the page is valid." % (url)
     #end while
 
     return pageMap
@@ -206,6 +248,7 @@ def generateSitemapFile(pageMap, fileName, changefreq="", priority=0.0):
     fw.close()
 #end def
         
+
 
 def main():
     try:
