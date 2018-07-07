@@ -1,6 +1,7 @@
-#! /usr/bin/env python
-""" 
+#! /usr/bin/env python3
+"""
     Copyright (C) 2007-2009 Vladimir Toncar
+    Copyright (C) 2018 Bernhard Ehlers
 
     Contributors:
         Redirect handling by Pavel "ShadoW" Dvorak
@@ -17,18 +18,15 @@
 
 """
 
-import os.path
 import sys
-import string
 import getopt
-import urllib2
-import urlparse
-from HTMLParser import HTMLParser
-from HTMLParser import HTMLParseError
+import urllib.error
+import urllib.parse
+import urllib.request
+import urllib.robotparser
+from datetime import datetime
+from html.parser import HTMLParser
 import xml.sax.saxutils
-import robotparser
-import re
-import httplib
 
 
 helpText = """sitemap_gen.py version 1.1.0 (2009-09-05)
@@ -40,7 +38,7 @@ tags and will not crawl into directories disallowed in the robots.txt file.
 
 Command line syntax:
 
-python sitemap_gen.py <options> <starting URL>
+python3 sitemap_gen.py <options> <starting URL>
 
 Available options:
 -h         --help                Print this text and exit
@@ -51,28 +49,28 @@ Available options:
                                  for example DOC and doc are treated
                                  the same. You can use this option several
                                  times to block several extensions.
-                                 
+
 -c <value> --changefreq <value>  Set the change frequency. The given value
                                  is used in all sitemap entries (maybe a
                                  future version of this script will change
                                  that). The allowed values are: always,
                                  hourly, daily, weekly, monthly, yearly,
                                  never.
-                                 
+
 -p <prio>  --priority <prio>     Set the priority. The value must be from
                                  the interval between 0.0 and 1.0. The value
                                  will be used in all sitemap entries.
-                                 
+
 -m <value> --max-urls <value>    Set the maximum number of URLs to be crawled.
                                  The default value is 1000 and the largest
                                  value that you can set is 50000 (the script
                                  generates only a single sitemap file).
-                                 
+
 -o <file>  --output-file <file>  Set the name of the geneated sitemap file.
                                  The default file name is sitemap.xml.
 
 Usage example:
-python sitemap_gen.py -b doc -b bmp -o test_sitemap.xml http://www.your-site-name.com/index.html
+python3 sitemap_gen.py -b doc -b bmp -o test_sitemap.xml http://www.your-site-name.com/index.html
 
 For more information, visit http://toncar.cz/opensource/sitemap_gen.html
 
@@ -83,43 +81,46 @@ allowedChangefreq = ["always", "hourly", "daily", "weekly", \
 
 def getPage(url):
     try:
-        f = urllib2.urlopen(url)
-        page = ""
-        for i in f.readlines():
-            page += i
-        date = f.info().getdate('Last-Modified')
-        if date == None:
+        f = urllib.request.urlopen(url)
+        page = f.read()
+        # Get the last modify date
+        try:
+            if 'last-modified' in f.headers:
+                date = f.headers['Last-Modified']
+            else:
+                date = f.headers['Date']
+            date = datetime.strptime(date, '%a, %d %b %Y %H:%M:%S %Z')
+            date = (date.year, date.month, date.day)
+        except (KeyError, ValueError):
             date = (0, 0, 0)
-        else:
-            date = date[:3]
         f.close()
         return (page, date, f.url)
-    except urllib2.URLError, detail:
-        print "%s. Skipping..." % (detail)
-        return (None, (0,0,0), "")
+    except urllib.error.URLError as detail:
+        print("%s. Skipping..." % (detail))
+        return (None, (0, 0, 0), "")
 #end def
 
 
 def joinUrls(baseUrl, newUrl):
-	helpUrl, fragment = urlparse.urldefrag(newUrl)
-        return urlparse.urljoin(baseUrl, helpUrl)
+    helpUrl, _ = urllib.parse.urldefrag(newUrl)
+    return urllib.parse.urljoin(baseUrl, helpUrl)
 #end def
 
 
 def getRobotParser(startUrl):
-	rp = robotparser.RobotFileParser()
-	
-	robotUrl = urlparse.urljoin(startUrl, "/robots.txt")
-	page, date, url = getPage(robotUrl)
+    rp = urllib.robotparser.RobotFileParser()
 
-	if page == None:
-	    print "Could not read ROBOTS.TXT at:", robotUrl
-	    return None
-	#end if
+    robotUrl = urllib.parse.urljoin(startUrl, "/robots.txt")
+    page, _, _ = getPage(robotUrl)
 
-	rp.parse(page)
-	print "Found ROBOTS.TXT at:", robotUrl
-	return rp
+    if page is None:
+        print("Could not read ROBOTS.TXT at: " + robotUrl)
+        return None
+    #end if
+
+    rp.parse(page.decode("utf-8", errors="ignore").splitlines())
+    print("Found ROBOTS.TXT at: " + robotUrl)
+    return rp
 #end def
 
 
@@ -128,63 +129,59 @@ class MyHTMLParser(HTMLParser):
     def __init__(self, pageMap, redirects, baseUrl, maxUrls, blockExtensions, robotParser):
         HTMLParser.__init__(self)
         self.pageMap = pageMap
-	self.redirects = redirects
+        self.redirects = redirects
         self.baseUrl = baseUrl
-        self.server = urlparse.urlsplit(baseUrl)[1] # netloc in python 2.5
+        self.server = urllib.parse.urlsplit(baseUrl)[1] # netloc in python 2.5
         self.maxUrls = maxUrls
-        self.blockExtensions = blockExtensions
-	self.robotParser = robotParser
+        self.blockExtensions = tuple(blockExtensions)
+        self.robotParser = robotParser
     #end def
 
     def hasBlockedExtension(self, url):
-        p = urlparse.urlparse(url)
+        p = urllib.parse.urlparse(url)
         path = p[2].upper() # path attribute
-        # In python 2.5, endswith() also accepts a tuple,
-        # but let's make it backwards compatible
-        for i in self.blockExtensions:
-            if path.endswith(i):
-                return 1
-        return 0
-    #end def        
+        return path.endswith(self.blockExtensions)
+    #end def
 
     def handle_starttag(self, tag, attrs):
         if len(self.pageMap) >= self.maxUrls:
             return
-        
-        if (tag.upper() == "BASE"):
-	    if (attrs[0][0].upper() == "HREF"):
-		self.baseUrl = joinUrls(self.baseUrl, attrs[0][1])
-		print "BASE URL set to", self.baseUrl
 
-        if (tag.upper() == "A"):
-	    #print "Attrs:", attrs
+        if tag.upper() == "BASE":
+            if attrs[0][0].upper() == "HREF":
+                self.baseUrl = joinUrls(self.baseUrl, attrs[0][1])
+                print("BASE URL set to " + self.baseUrl)
+
+        if tag.upper() == "A":
+            #print("Attrs: " + str(attrs))
             url = ""
             # Let's scan the list of tag's attributes
-	    for attr in attrs:
-                #print "  attr:", attr
+            for attr in attrs:
+                #print("  attr: " + str(attr))
                 if (attr[0].upper() == "REL") and (attr[1].upper().find('NOFOLLOW') != -1):
                     # We have discovered a nofollow, so we won't continue
-                    return  
+                    return
                 elif (attr[0].upper() == "HREF") and (attr[1].upper().find('MAILTO:') == -1):
                     # We have discovered a link that is not a Mailto:
                     url = joinUrls(self.baseUrl, attr[1])
             #end for
             # if the url is empty, there was none in the list of attributes
-            if url == "": return
-            
+            if url == "":
+                return
+
             # Check if we want to follow the link
-            if urlparse.urlsplit(url)[1] <> self.server:
+            if urllib.parse.urlsplit(url)[1] != self.server:
                 return
             if self.hasBlockedExtension(url) or self.redirects.count(url) > 0:
                 return
-            if (self.robotParser <> None) and not(self.robotParser.can_fetch("*", url)):
-                print "URL restricted by ROBOTS.TXT: ", url
+            if self.robotParser is not None and not self.robotParser.can_fetch("*", url):
+                print("URL restricted by ROBOTS.TXT: " + url)
                 return
             # It's OK to add url to the map and fetch it later
-            if not(self.pageMap.has_key(url)):
+            if not url in self.pageMap:
                 self.pageMap[url] = ()
         #end if
-	    
+
     #end def
 #end class
 
@@ -203,27 +200,25 @@ def parsePages(startUrl, maxUrls, blockExtensions):
 
     while True:
         url = getUrlToProcess(pageMap)
-        if url == None:
+        if url is None:
             break
-        print " ", url
+        print("  " + url)
         page, date, newUrl = getPage(url)
-        if page == None:
+        if page is None:
             del pageMap[url]
-	elif url != newUrl:
-	    print "Redirect -> " + newUrl
+        elif url != newUrl:
+            print("Redirect -> " + newUrl)
             del pageMap[url]
-	    pageMap[newUrl] = ()
-	    redirects.append(url)
+            pageMap[newUrl] = ()
+            redirects.append(url)
         else:
             pageMap[url] = date
             parser = MyHTMLParser(pageMap, redirects, url, maxUrls, blockExtensions, robotParser)
             try:
-                parser.feed(page)
+                parser.feed(page.decode("utf-8", errors='strict'))
                 parser.close()
-            except HTMLParseError:
-                print "Error parsing %s, skipping." % (url)
-            except UnicodeDecodeError:
-                print "Failed decoding %s . Try to check if the page is valid." % (url)
+            except UnicodeError:
+                print("Failed decoding %s . Try to check if the page is valid." % (url))
     #end while
 
     return pageMap
@@ -236,18 +231,18 @@ def generateSitemapFile(pageMap, fileName, changefreq="", priority=0.0):
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n''')
     for i in pageMap.keys():
         fw.write('<url>\n  <loc>%s</loc>\n' % (xml.sax.saxutils.escape(i)))
-        if pageMap[i] not in [(), (0,0,0)]:
+        if pageMap[i] not in [(), (0, 0, 0)]:
             fw.write('  <lastmod>%4d-%02d-%02d</lastmod>\n' % pageMap[i])
-        if changefreq <> "":
+        if changefreq != "":
             fw.write('  <changefreq>%s</changefreq>\n' % (changefreq))
         if priority > 0.0:
             fw.write('  <priority>%1.1f</priority>\n' % (priority))
         fw.write('</url>\n')
     #end for
-    fw.write('</urlset>')
+    fw.write('</urlset>\n')
     fw.close()
 #end def
-        
+
 
 
 def main():
@@ -257,8 +252,8 @@ def main():
                 ["help", "block=", "changefreq=", \
                  "max-urls=", "priority=", "output-file="])
     except getopt.GetoptError:
-        print helpText
-        return
+        sys.stderr.write(helpText)
+        return 1
 
     blockExtensions = []
     changefreq = ""
@@ -267,53 +262,54 @@ def main():
     maxUrls = 1000
     pageMap = {}
 
-    for opt,arg in opts:
+    for opt, arg in opts:
         if opt in ("-h", "--help"):
-            print helpText
-            return
+            sys.stderr.write(helpText)
+            return 1
         elif opt in ("-b", "--block"):
             blockExtensions.append("." + arg.upper())
         elif opt in ("-c", "--changefreq"):
             if arg in allowedChangefreq:
                 changefreq = arg
             else:
-                print "Allowed changefreq values are:"
+                sys.stderr.write("Allowed changefreq values are:\n")
                 for i in allowedChangefreq:
-                    print i
-                print
-                return
+                    sys.stderr.write("  {}\n".format(i))
+                return 1
         elif opt in ("-m", "--max-urls"):
             maxUrls = int(arg)
             if (maxUrls < 0) or (maxUrls > 50000):
-                print "The maximum number of URLs must be greater than 0 and smaller than 50000"
-                return
+                sys.stderr.write("The maximum number of URLs must be between 1 and 50000\n")
+                return 1
         elif opt in ("-p", "--priority"):
             priority = float(arg)
             if (priority < 0.0) or (priority > 1.0):
-                print "Priority must be between 0.0 and 1.0"
-                return
+                sys.stderr.write("Priority must be between 0.0 and 1.0\n")
+                return 1
         elif opt in ("-o", "--output-file"):
             fileName = arg
             if fileName in ("", ".", ".."):
-                print "Please provide a sensible file name"
-                return
+                sys.stderr.write("Please provide a sensible file name\n")
+                return 1
         #end if
-        
-    if len(args) == 0:
-        print "You must provide the starting URL.\nTry the -h option for help."
-        return
+
+    if not args:
+        sys.stderr.write("You must provide the starting URL.\nTry the -h option for help.\n")
+        return 1
 
     # Set user agent string
-    opener = urllib2.build_opener()
+    opener = urllib.request.build_opener()
     opener.addheaders = [('User-agent', 'sitemap_gen/1.0')]
-    urllib2.install_opener(opener)
+    urllib.request.install_opener(opener)
 
     # Start processing
-    print "Crawling the site..."
+    print("Crawling the site...")
     pageMap = parsePages(args[0], maxUrls, blockExtensions)
-    print "Generating sitemap: %d URLs" % (len(pageMap))
+    print("Generating sitemap: %d URLs" % (len(pageMap)))
     generateSitemapFile(pageMap, fileName, changefreq, priority)
-    print "Finished."
+    print("Finished.")
+    return 0
 #end def
 
-if __name__ == '__main__': main()
+if __name__ == '__main__':
+    sys.exit(main())
