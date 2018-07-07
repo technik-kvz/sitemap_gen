@@ -23,10 +23,10 @@ import getopt
 import urllib.error
 import urllib.parse
 import urllib.request
-import urllib.robotparser
 from datetime import datetime
 from html.parser import HTMLParser
 import xml.sax.saxutils
+from reppy.robots import Robots
 
 
 helpText = """sitemap_gen.py version 1.1.0 (2009-09-05)
@@ -108,8 +108,6 @@ def joinUrls(baseUrl, newUrl):
 
 
 def getRobotParser(startUrl):
-    rp = urllib.robotparser.RobotFileParser()
-
     robotUrl = urllib.parse.urljoin(startUrl, "/robots.txt")
     page, _, _ = getPage(robotUrl)
 
@@ -118,7 +116,7 @@ def getRobotParser(startUrl):
         return None
     #end if
 
-    rp.parse(page.decode("utf-8", errors="ignore").splitlines())
+    rp = Robots.parse(robotUrl, page)
     print("Found ROBOTS.TXT at: " + robotUrl)
     return rp
 #end def
@@ -174,7 +172,7 @@ class MyHTMLParser(HTMLParser):
                 return
             if self.hasBlockedExtension(url) or self.redirects.count(url) > 0:
                 return
-            if self.robotParser is not None and not self.robotParser.can_fetch("*", url):
+            if self.robotParser is not None and not self.robotParser.allowed(url, "*"):
                 print("URL restricted by ROBOTS.TXT: " + url)
                 return
             # It's OK to add url to the map and fetch it later
