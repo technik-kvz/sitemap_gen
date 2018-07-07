@@ -312,4 +312,8 @@ def main():
 #end def
 
 if __name__ == '__main__':
-    sys.exit(main())
+    try:
+        status_code = main()
+    except KeyboardInterrupt:
+        status_code = 130
+    sys.exit(status_code)
