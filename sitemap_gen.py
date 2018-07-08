@@ -29,7 +29,7 @@ import xml.sax.saxutils
 from reppy.robots import Robots
 
 
-helpText = """sitemap_gen.py version 1.1.0 (2009-09-05)
+helpText = """sitemap_gen.py version 1.2.0 (2018-07-08)
 
 This script crawls a web site from a given starting URL and generates
 a Sitemap file in the format that is accepted by Google. The crawler
