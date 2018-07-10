@@ -29,7 +29,7 @@ import xml.sax.saxutils
 from reppy.robots import Robots
 
 
-helpText = """sitemap_gen.py version 1.2.0 (2018-07-08)
+helpText = """sitemap_gen.py version 1.2.1 (2018-07-10)
 
 This script crawls a web site from a given starting URL and generates
 a Sitemap file in the format that is accepted by Google. The crawler
@@ -85,7 +85,7 @@ def getPage(url):
         page = f.read()
         # Get the last modify date
         try:
-            if 'last-modified' in f.headers:
+            if 'Last-Modified' in f.headers:
                 date = f.headers['Last-Modified']
             else:
                 date = f.headers['Date']
