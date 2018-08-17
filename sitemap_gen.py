@@ -1,4 +1,4 @@
-#! /usr/bin/env python3
+#!/usr/bin/python3
 """
     Copyright (C) 2007-2009 Vladimir Toncar
     Copyright (C) 2018 Bernhard Ehlers
