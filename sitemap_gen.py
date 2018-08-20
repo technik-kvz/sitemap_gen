@@ -66,7 +66,7 @@ Available options:
                                  value that you can set is 50000 (the script
                                  generates only a single sitemap file).
 
--o <file>  --output-file <file>  Set the name of the geneated sitemap file.
+-o <file>  --output-file <file>  Set the name of the generated sitemap file.
                                  The default file name is sitemap.xml.
 
 Usage example:
@@ -118,7 +118,8 @@ def getRobotParser(startUrl):
 
     rp = Robots.parse(robotUrl, page)
     print("Found ROBOTS.TXT at: " + robotUrl)
-    return rp
+    # return rp
+    return None
 #end def
 
 
