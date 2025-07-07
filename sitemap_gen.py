@@ -20,6 +20,7 @@
 
 import sys
 import getopt
+import requests
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -79,8 +80,9 @@ For more information, visit http://toncar.cz/opensource/sitemap_gen.html
 allowedChangefreq = ["always", "hourly", "daily", "weekly", \
                      "monthly", "yearly", "never"]
 
-def getPage(url):
+def getPage(_url):
     try:
+        url = requests.utils.requote_uri(_url)
         f = urllib.request.urlopen(url)
         page = f.read()
         # Get the last modify date
